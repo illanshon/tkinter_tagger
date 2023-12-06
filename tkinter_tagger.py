@@ -1,4 +1,4 @@
-# путь до проекта без русских букв, радактирование тегов работает с jpg , с png работает, но пока с ошибками
+# радактирование тегов работает с jpg , с png работает, но иногда с ошибками
 # pip install pillow
 
 import tkinter as tk
@@ -9,6 +9,9 @@ from PIL import Image, ImageTk
 from PIL import *
 import os
 import subprocess
+import time
+import threading
+# import concurrent.futures
 
 # dynamic_vars = {}
 # dynamic_vars["var1"] = 1
@@ -17,17 +20,21 @@ import subprocess
 
 class ImageViewer:
     
-    checkbox_list = []
-    image_path = ''
-    checkbox_value = []
-    dynamic_var = {}
-    dynamic_cb = {}
-
     def __init__(self, master):
+        self.add_category_list = []
+        self.remove_category_list = []
         self.master = master
         self.image_files = []
         self.current_index = 0
         self.create_widgets()
+        self.checkbox_list = []
+        self.image_path = ''
+        self.checkbox_value = []
+        self.dynamic_var = {}
+        self.dynamic_cb = {}
+        self.previous_image_path = ''
+        self.event = threading.Event()
+        self.stop_flag = False
 
     def create_widgets(self):
         self.open_button = ttk.Button(self.master, text="Открыть каталог", width=23, command=self.open_directory)
@@ -47,13 +54,14 @@ class ImageViewer:
         self.master.bind("w", self.resize_image)
         self.master.bind("q", self.exit)
 
-
     def open_directory(self):
         directory = filedialog.askdirectory()
         if directory:
             self.image_files = [os.path.join(directory, file) for file in os.listdir(directory) if file.lower().endswith((".jpg", ".jpeg", ".png", ".gif"))]
         if self.image_files:
             self.show_image()
+            self.previous_image_path = self.image_path
+            self.tag_reading(self, self.image_path, self.add_category_list, self.remove_category_list,)
 
     def resize_image(self, event):
         image = Image.open(self.image_files[self.current_index])
@@ -71,14 +79,59 @@ class ImageViewer:
         self.label.image = photo
         self.label.place(x = 0,y = 0)            
 
-
-
     def show_image(self):
              
         self.resize_image(event=self.resize_image)
+  
+    # Очищаем чекбоксы после каждой смены изображений
+    def delete_checkboxes(self):
 
+        for cb in self.checkbox_list:
+            print(f"destroy{cb}")
+            cb.destroy()            
+
+        self.checkbox_list.clear()
+    
+    def change_tags(self, previous_image_path, add_category_list, remove_category_list, init = False, ):
+        if init == True:
+                       
+            if len(add_category_list) > 0:
+                for i in add_category_list:
+                    
+                    new_category = i
+                    command = f'{exiftool_path} -XMP:Subject+={new_category} {previous_image_path}'
+                    subprocess.run(command, shell=True)
+                    # Команда для изменения тега категории с использованием exiftool
+                    command = f'{exiftool_path} -Keywords+={new_category} {previous_image_path}'
+                
+                    subprocess.run(command, shell=True)
+
+                    # удаляем дубликат .origin
+                    try:
+                        os.remove(str(previous_image_path) + "_original")
+                    except FileNotFoundError:
+                        pass
+            
+
+            if len(remove_category_list) > 0:
+                for i in remove_category_list:
+                    new_category = i
+                    command = f'{exiftool_path} -XMP:Subject-={new_category} {previous_image_path}'
+                    subprocess.run(command, shell=True)
+                    # Команда для изменения тега категории с использованием exiftool
+                    command = f'{exiftool_path} -Keywords-={new_category} {previous_image_path}'
+                
+                    subprocess.run(command, shell=True)
+
+                    try:
+                        os.remove(str(previous_image_path) + "_original")
+                    except FileNotFoundError:
+                        pass                  
+
+    def tag_reading(self, image_path_local, add_category_list, remove_category_list, event):
+        
         self.image_path = self.image_files[self.current_index]
-              
+        
         # command = f'{exiftool_path} -Subject {self.image_path}'
         # subprocess.run(command, shell=True)
 
@@ -95,14 +148,16 @@ class ImageViewer:
         # создаем список убираем лишнее
         output = output.replace("b'", "").replace("\\r\\n'", "").replace("Keywords", "").replace(" ", "").replace(":", "").replace("Subject", "").replace("`", "").replace("'", "")  
         output = output.split(",")
-        print(output)
-       
+        # print(output)
+        
+        # self.change_tags(True)
+        # self.add_category_list = []
+        # self.remove_category_list = []
+
         if process.returncode == 0:
-   
-                self.delete_checkboxes()
+                                
                 self.dynamic_var = {}
                 self.dynamic_cb = {}  
-
 
                 if output != '':
                 # создаем список тегов которые уже есть в изображении            
@@ -134,61 +189,62 @@ class ImageViewer:
         else:
             print("Произошла ошибка при выполнении команды exiftool")
 
-    # Очищаем чекбоксы после каждой смены изображений
-    def delete_checkboxes(self):
-
-        for cb in self.checkbox_list:
-            print(f"destroy{cb}")
-            cb.destroy()            
-
-        self.checkbox_list.clear()
+        self.stop_flag = False
+        self.change_tags(image_path_local, add_category_list, remove_category_list, True)
+         
+        # self.add_category_list = []
+        # self.remove_category_list = []
         
+            
     # обработка событий нажатия на чекбоксы
     def select2(self, var2, category):
-        print(var2.get())
-        print(var2)
+        # print(var2.get())
+        # print(category)
 
         # Добавляем теги
-        if var2.get() == 1:            
-            new_category = category
-            command = f'{exiftool_path} -XMP:Subject+={new_category} {self.image_path}'
-            subprocess.run(command, shell=True)
-            # Команда для изменения тега категории с использованием exiftool
-            command = f'{exiftool_path} -Keywords+={new_category} {self.image_path}'
-           
-            subprocess.run(command, shell=True)
-
-            # удаляем дубликат .origin
-            try:
-                os.remove(self.image_path + "_original")
-            except FileNotFoundError:
-                pass
-
+        if var2.get() == 1:
+            self.add_category_list.append(category)
+            
         # удаляем теги   
         else:
-            new_category = category
-            command = f'{exiftool_path} -XMP:Subject-={new_category} {self.image_path}'
-            subprocess.run(command, shell=True)
-            # Команда для изменения тега категории с использованием exiftool
-            command = f'{exiftool_path} -Keywords-={new_category} {self.image_path}'
-          
-            subprocess.run(command, shell=True)
-
-            try:
-                os.remove(self.image_path + "_original")
-            except FileNotFoundError:
-                pass
+            self.remove_category_list.append(category)
 
     def show_previous_image(self, event):
-        if self.current_index > 0:
-            self.current_index -= 1
-            self.show_image()
-
+        if self.stop_flag == False:
+            if self.current_index > 0:
+                self.current_index -= 1
+                self.show_image()
+                self.delete_checkboxes()
+                self.stop_flag = True
+                
+                self.add_thread_tag_reading()
+                self.event.is_set()
+                        
     def show_next_image(self, event):
-        if self.current_index < len(self.image_files) - 1:
-            self.current_index += 1
-            self.show_image()
-
+        if self.stop_flag == False:
+            if self.current_index < len(self.image_files) - 1:
+                self.current_index += 1
+                self.show_image()
+                self.delete_checkboxes()
+                self.stop_flag = True
+            
+                self.add_thread_tag_reading()
+                self.event.is_set()
+            
+    def add_thread_tag_reading(self):
+                
+        thread = threading.Thread(target=self.tag_reading, args=(self.previous_image_path, self.add_category_list, self.remove_category_list, self.event, ))
+        thread.start()
+        self.add_category_list = []
+        self.remove_category_list = []
+        self.previous_image_path = self.image_files[self.current_index]  
+           
+        # with concurrent.futures.ThreadPoolExecutor() as executor:
+        #     # Запускаем функцию в отдельном потоке
+        #     executor.submit(self.tag_reading, 'task1')
+        #     print("проб")
+        #     # time.sleep(2.05)
+        
     def fullscreen_change(self, event):
         global first_init
         global fullscreen_enabled
@@ -235,9 +291,9 @@ if __name__ == "__main__":
 
     label = Label(text="q - выход", width=20, background="#B3E5FC") # создаем текстовую метку
     label.pack(anchor=NE)  
-    label = Label(text="e - полный экран",width=20, background="#B3E5FC") # создаем текстовую метку
+    label = Label(text="e - полный экран",width=20, background="#B3E5FC")
     label.pack(anchor=NE)  
-    label = Label(text="w - растянуть картинку",width=20, background="#B3E5FC") # создаем текстовую метку
+    label = Label(text="w - растянуть картинку",width=20, background="#B3E5FC")
     label.pack(anchor=NE)  
 
     image_viewer = ImageViewer(root)
